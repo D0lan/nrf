@@ -321,7 +321,7 @@ class SpatioTemporalModel(torch.nn.Module):
                         kernel_size=kernel_sizes[i],
                         channels_in=channels_in,
                         channels_out=(
-                            3 if i == p.channel_layers - 1 else len(spatial_parameters)
+                            p.n_classes if i == p.channel_layers - 1 else len(spatial_parameters)
                         ),
                         init_scheme=p.init_scheme_spatial,
                         device=p.device,
@@ -346,7 +346,7 @@ class SpatioTemporalModel(torch.nn.Module):
                     kernel_size=kernel_sizes[i],
                     channels_in=channels_in,
                     channels_out=(
-                        3 if i == p.channel_layers - 1 else len(spatial_parameters)
+                        p.n_classes if i == p.channel_layers - 1 else len(spatial_parameters)
                     ),
                     init_scheme=p.init_scheme_spatial,
                     device=p.device,
@@ -399,9 +399,8 @@ class SpatioTemporalModel(torch.nn.Module):
     def forward(self, x: torch.Tensor, state=None):
         if state is None:
             channel_state = [None] * len(self.channels)
-            classifier_state = None
         else:
-            channel_state, classifier_state = state
+            channel_state, _ = state  # ignore classifier_state
 
         output_stack = []
         channel_activations = defaultdict(list)
@@ -415,20 +414,16 @@ class SpatioTemporalModel(torch.nn.Module):
                 channel_outputs.append(channel_out)
                 channel_activations[i].append(channel_activation.mean())
 
+            # [B, C_feat, H', W'] after merging channels
             channel_outputs = torch.stack(channel_outputs, dim=1)
-            channel_merged = channel_outputs.mean(dim=1)  # Average the channels
-            classifier_out, classifier_state = self.classifier(
-                channel_merged, classifier_state
-            )
-            output_stack.append(classifier_out)
+            channel_merged = channel_outputs.mean(dim=1)
+            output_stack.append(channel_merged)
 
         activations = [torch.stack(v).mean() for v in channel_activations.values()]
 
-        return (
-            torch.stack(output_stack),
-            (channel_state, classifier_state),
-            activations,
-        )
+        # output_stack: [T, B, C_feat, H', W']
+        return torch.stack(output_stack), channel_state, activations
+
     
     def spatiotemporal_parameters(self):
         spatial = []
